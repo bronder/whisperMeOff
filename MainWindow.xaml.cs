@@ -32,7 +32,6 @@ public partial class MainWindow : Window
     private ObservableCollection<ChatMessage> _messages = new();
     private OllamaService _aiService = new();
     private List<(string sender, string message)> _conversationHistory = new();
-    private bool _isConnected = false;
     private AppSettings _settings = new();
 
     public MainWindow()
@@ -47,7 +46,7 @@ public partial class MainWindow : Window
         
         // Configure AI service with selected profile
         var profile = _settings.Profiles[_settings.SelectedProfileIndex];
-        _aiService.Configure(profile.ServerUrl, profile.Model, profile.ApiKey);
+        _aiService.Configure(profile.ServerUrl, profile.Model, profile.ApiKey, profile.Token, profile.AgentId, profile.Name);
         
         // Restore window position and size
         if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop))
@@ -96,7 +95,6 @@ public partial class MainWindow : Window
             var models = await _aiService.GetAvailableModelsAsync();
             if (models.Count > 0)
             {
-                _isConnected = true;
                 AddMessage("AI", $"✓ Connected to AI server! Available models: {string.Join(", ", models)}", true);
             }
             else
@@ -201,7 +199,7 @@ public partial class MainWindow : Window
         {
             Title = "AI Settings",
             Width = 480,
-            Height = 540,
+            Height = 750,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
@@ -320,6 +318,50 @@ public partial class MainWindow : Window
         apiKeyBorder.Child = apiKeyTextBox;
         mainPanel.Children.Add(apiKeyBorder);
 
+        // Token (for OpenClaw)
+        var tokenLabel = new TextBlock { Text = "Token", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
+        mainPanel.Children.Add(tokenLabel);
+
+        var tokenBorder = new Border 
+        { 
+            CornerRadius = new CornerRadius(6),
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 18)
+        };
+        var tokenTextBox = new TextBox 
+        { 
+            Padding = new Thickness(12, 10, 12, 10),
+            FontSize = 14,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
+        };
+        tokenBorder.Child = tokenTextBox;
+        mainPanel.Children.Add(tokenBorder);
+
+        // Agent ID (for OpenClaw)
+        var agentIdLabel = new TextBlock { Text = "Agent ID", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
+        mainPanel.Children.Add(agentIdLabel);
+
+        var agentIdBorder = new Border 
+        { 
+            CornerRadius = new CornerRadius(6),
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 25)
+        };
+        var agentIdTextBox = new TextBox 
+        { 
+            Padding = new Thickness(12, 10, 12, 10),
+            FontSize = 14,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
+        };
+        agentIdBorder.Child = agentIdTextBox;
+        mainPanel.Children.Add(agentIdBorder);
+
         // Update fields when profile changes
         void UpdateFields()
         {
@@ -329,6 +371,8 @@ public partial class MainWindow : Window
                 urlTextBox.Text = _settings.Profiles[idx].ServerUrl;
                 modelComboBox.Text = _settings.Profiles[idx].Model;
                 apiKeyTextBox.Text = _settings.Profiles[idx].ApiKey;
+                tokenTextBox.Text = _settings.Profiles[idx].Token;
+                agentIdTextBox.Text = _settings.Profiles[idx].AgentId;
             }
         }
         
@@ -427,12 +471,15 @@ public partial class MainWindow : Window
                 _settings.Profiles[idx].ServerUrl = urlTextBox.Text;
                 _settings.Profiles[idx].Model = modelComboBox.Text;
                 _settings.Profiles[idx].ApiKey = apiKeyTextBox.Text;
+                _settings.Profiles[idx].Token = tokenTextBox.Text;
+                _settings.Profiles[idx].AgentId = agentIdTextBox.Text;
                 _settings.SelectedProfileIndex = idx;
             }
             
             _settings.Save();
             
-            _aiService.Configure(urlTextBox.Text, modelComboBox.Text, apiKeyTextBox.Text);
+            var selectedProfileName = profileComboBox.SelectedItem?.ToString() ?? "OpenClaw";
+            _aiService.Configure(urlTextBox.Text, modelComboBox.Text, apiKeyTextBox.Text, tokenTextBox.Text, agentIdTextBox.Text, selectedProfileName);
             _conversationHistory.Clear();
             
             try
@@ -440,7 +487,6 @@ public partial class MainWindow : Window
                 var models = await _aiService.GetAvailableModelsAsync();
                 if (models.Count > 0)
                 {
-                    _isConnected = true;
                     AddMessage("AI", $"✓ Connected! Models available: {string.Join(", ", models)}", true);
                 }
                 else
