@@ -660,9 +660,9 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Source\\GitHub\\whisperMeOff\\whisperMeOff.csproj",
+      "projectUniqueName": "C:\\Source\\GitHub\\whisperMeOff\\whisperMeOff_fztjbxif_wpftmp.csproj",
       "projectName": "whisperMeOff",
-      "projectPath": "C:\\Source\\GitHub\\whisperMeOff\\whisperMeOff.csproj",
+      "projectPath": "C:\\Source\\GitHub\\whisperMeOff\\whisperMeOff_fztjbxif_wpftmp.csproj",
       "packagesPath": "C:\\Users\\scott\\.nuget\\packages\\",
       "outputPath": "C:\\Source\\GitHub\\whisperMeOff\\obj\\",
       "projectStyle": "PackageReference",
