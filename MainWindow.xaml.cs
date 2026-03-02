@@ -3,6 +3,14 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using DrawingColor = System.Drawing.Color;
+using DrawingBrush = System.Drawing.Brushes;
+using DrawingBitmap = System.Drawing.Bitmap;
+using DrawingGraphics = System.Drawing.Graphics;
+using DrawingSolidBrush = System.Drawing.SolidBrush;
+using DrawingPen = System.Drawing.Pen;
+using Drawing2DSmoothingMode = System.Drawing.Drawing2D.SmoothingMode;
 
 namespace whisperMeOff;
 
@@ -31,12 +39,15 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         
+        // Set window icon
+        Icon = CreateRobotIcon();
+        
         // Load saved settings
         _settings = AppSettings.Load();
         
         // Configure AI service with selected profile
         var profile = _settings.Profiles[_settings.SelectedProfileIndex];
-        _aiService.Configure(profile.ServerUrl, profile.Model);
+        _aiService.Configure(profile.ServerUrl, profile.Model, profile.ApiKey);
         
         // Restore window position and size
         if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop))
@@ -190,7 +201,7 @@ public partial class MainWindow : Window
         {
             Title = "AI Settings",
             Width = 480,
-            Height = 470,
+            Height = 540,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
@@ -214,52 +225,100 @@ public partial class MainWindow : Window
         var profileLabel = new TextBlock { Text = "Server Profile", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
         mainPanel.Children.Add(profileLabel);
 
+        // Wrap ComboBox in border for rounded corners
+        var profileComboBoxBorder = new Border 
+        { 
+            CornerRadius = new CornerRadius(6),
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 18)
+        };
         var profileComboBox = new ComboBox 
         { 
-            Margin = new Thickness(0, 0, 0, 18), 
             IsEditable = true,
             Padding = new Thickness(12, 10, 12, 10),
             FontSize = 14,
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1)
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
         };
+        profileComboBoxBorder.Child = profileComboBox;
         foreach (var profile in _settings.Profiles)
         {
             profileComboBox.Items.Add(profile.Name);
         }
         profileComboBox.SelectedIndex = _settings.SelectedProfileIndex;
-        mainPanel.Children.Add(profileComboBox);
+        mainPanel.Children.Add(profileComboBoxBorder);
 
         // Server URL
         var urlLabel = new TextBlock { Text = "Server URL", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
         mainPanel.Children.Add(urlLabel);
 
-        var urlTextBox = new TextBox 
+        // Wrap TextBox in border for rounded corners
+        var urlBorder = new Border 
         { 
-            Margin = new Thickness(0, 0, 0, 18),
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
+            CornerRadius = new CornerRadius(6),
             Background = Brushes.White,
             BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1)
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 18)
         };
-        mainPanel.Children.Add(urlTextBox);
+        var urlTextBox = new TextBox 
+        { 
+            Padding = new Thickness(12, 10, 12, 10),
+            FontSize = 14,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
+        };
+        urlBorder.Child = urlTextBox;
+        mainPanel.Children.Add(urlBorder);
 
         // Model name
         var modelLabel = new TextBlock { Text = "Model Name", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
         mainPanel.Children.Add(modelLabel);
 
-        var modelTextBox = new TextBox 
+        // Wrap ComboBox in border for model selection
+        var modelBorder = new Border 
         { 
-            Margin = new Thickness(0, 0, 0, 25),
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
+            CornerRadius = new CornerRadius(6),
             Background = Brushes.White,
             BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1)
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 25)
         };
-        mainPanel.Children.Add(modelTextBox);
+        var modelComboBox = new ComboBox 
+        { 
+            IsEditable = true,
+            Padding = new Thickness(12, 10, 12, 10),
+            FontSize = 14,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
+        };
+        modelBorder.Child = modelComboBox;
+        mainPanel.Children.Add(modelBorder);
+
+        // API Key (optional)
+        var apiKeyLabel = new TextBlock { Text = "API Key (optional)", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
+        mainPanel.Children.Add(apiKeyLabel);
+
+        // Wrap TextBox in border for rounded corners
+        var apiKeyBorder = new Border 
+        { 
+            CornerRadius = new CornerRadius(6),
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 25)
+        };
+        var apiKeyTextBox = new TextBox 
+        { 
+            Padding = new Thickness(12, 10, 12, 10),
+            FontSize = 14,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
+        };
+        apiKeyBorder.Child = apiKeyTextBox;
+        mainPanel.Children.Add(apiKeyBorder);
 
         // Update fields when profile changes
         void UpdateFields()
@@ -268,7 +327,8 @@ public partial class MainWindow : Window
             if (idx >= 0 && idx < _settings.Profiles.Count)
             {
                 urlTextBox.Text = _settings.Profiles[idx].ServerUrl;
-                modelTextBox.Text = _settings.Profiles[idx].Model;
+                modelComboBox.Text = _settings.Profiles[idx].Model;
+                apiKeyTextBox.Text = _settings.Profiles[idx].ApiKey;
             }
         }
         
@@ -334,11 +394,24 @@ public partial class MainWindow : Window
         testButton.Click += async (s, args) =>
         {
             var testService = new OllamaService();
-            testService.Configure(urlTextBox.Text, modelTextBox.Text);
+            testService.Configure(urlTextBox.Text, "", apiKeyTextBox.Text);
             var models = await testService.GetAvailableModelsAsync();
             if (models.Count > 0)
             {
-                MessageBox.Show($"✓ Connected! Available models:\n{string.Join("\n", models)}", "Connection Test", MessageBoxButton.OK, MessageBoxImage.Information);
+                // Populate the model ComboBox with available models
+                modelComboBox.Items.Clear();
+                foreach (var model in models)
+                {
+                    modelComboBox.Items.Add(model);
+                }
+                
+                // Select the first model if none selected
+                if (modelComboBox.SelectedIndex < 0 && modelComboBox.Items.Count > 0)
+                {
+                    modelComboBox.SelectedIndex = 0;
+                }
+                
+                MessageBox.Show($"✓ Connected! Found {models.Count} model(s). Select from the dropdown or type a custom model name.", "Connection Test", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
             {
@@ -352,13 +425,14 @@ public partial class MainWindow : Window
             if (idx >= 0 && idx < _settings.Profiles.Count)
             {
                 _settings.Profiles[idx].ServerUrl = urlTextBox.Text;
-                _settings.Profiles[idx].Model = modelTextBox.Text;
+                _settings.Profiles[idx].Model = modelComboBox.Text;
+                _settings.Profiles[idx].ApiKey = apiKeyTextBox.Text;
                 _settings.SelectedProfileIndex = idx;
             }
             
             _settings.Save();
             
-            _aiService.Configure(urlTextBox.Text, modelTextBox.Text);
+            _aiService.Configure(urlTextBox.Text, modelComboBox.Text, apiKeyTextBox.Text);
             _conversationHistory.Clear();
             
             try
@@ -392,6 +466,50 @@ public partial class MainWindow : Window
         settingsWindow.Content = mainPanel;
         settingsWindow.ShowDialog();
     }
+
+    private ImageSource CreateRobotIcon()
+    {
+        // Create a simple robot icon programmatically
+        using var bitmap = new DrawingBitmap(32, 32);
+        using var g = DrawingGraphics.FromImage(bitmap);
+        
+        // Background - rounded rectangle
+        g.SmoothingMode = Drawing2DSmoothingMode.AntiAlias;
+        g.Clear(DrawingColor.FromArgb(0, 120, 212)); // Blue background
+        
+        // Robot head - rounded rectangle
+        var headBrush = new DrawingSolidBrush(DrawingColor.White);
+        g.FillRectangle(headBrush, 6, 4, 20, 18);
+        
+        // Eyes
+        g.FillEllipse(new DrawingSolidBrush(DrawingColor.FromArgb(0, 120, 212)), 10, 9, 4, 4);
+        g.FillEllipse(new DrawingSolidBrush(DrawingColor.FromArgb(0, 120, 212)), 18, 9, 4, 4);
+        
+        // Mouth
+        g.DrawLine(new DrawingPen(DrawingColor.FromArgb(0, 120, 212), 2), 11, 17, 21, 17);
+        
+        // Antenna
+        g.DrawLine(new DrawingPen(DrawingColor.White, 2), 16, 4, 16, 1);
+        g.FillEllipse(headBrush, 14, 0, 4, 3);
+        
+        // Convert to WPF ImageSource
+        var hBitmap = bitmap.GetHbitmap();
+        try
+        {
+            return System.Windows.Interop.Imaging.CreateBitmapSourceFromHBitmap(
+                hBitmap,
+                IntPtr.Zero,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromEmptyOptions());
+        }
+        finally
+        {
+            DeleteObject(hBitmap);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr hObject);
 
     private void Exit_Click(object sender, RoutedEventArgs e)
     {

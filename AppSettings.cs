@@ -8,6 +8,7 @@ public class ServerProfile
     public string Name { get; set; } = "";
     public string ServerUrl { get; set; } = "";
     public string Model { get; set; } = "";
+    public string ApiKey { get; set; } = "";
 }
 
 public class AppSettings
@@ -15,8 +16,8 @@ public class AppSettings
     public List<ServerProfile> Profiles { get; set; } = new()
     {
         new ServerProfile { Name = "Ollama", ServerUrl = "http://localhost:11434", Model = "" },
-        new ServerProfile { Name = "LM Studio", ServerUrl = "http://localhost:1234", Model = "" },
-        new ServerProfile { Name = "Jan AI", ServerUrl = "http://localhost:1337", Model = "" }
+        new ServerProfile { Name = "LM Studio", ServerUrl = "http://localhost:1234/v1", Model = "" },
+        new ServerProfile { Name = "Jan AI", ServerUrl = "http://localhost:1337/v1", Model = "" }
     };
     
     public int SelectedProfileIndex { get; set; } = 0;

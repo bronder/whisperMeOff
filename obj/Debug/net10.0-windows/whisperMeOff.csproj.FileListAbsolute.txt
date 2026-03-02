@@ -18,3 +18,10 @@ C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\refint\whisperMeOff.dll
 C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\whisperMeOff.pdb
 C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\whisperMeOff.genruntimeconfig.cache
 C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\ref\whisperMeOff.dll
+C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\whisperMeOff.csproj.AssemblyReference.cache
+C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\whisperMeOff_Content.g.cs
+C:\Source\GitHub\whisperMeOff\bin\Debug\net10.0-windows\MaterialDesignColors.dll
+C:\Source\GitHub\whisperMeOff\bin\Debug\net10.0-windows\MaterialDesignThemes.Wpf.dll
+C:\Source\GitHub\whisperMeOff\bin\Debug\net10.0-windows\Microsoft.Xaml.Behaviors.dll
+C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\App.baml
+C:\Source\GitHub\whisperMeOff\obj\Debug\net10.0-windows\whisperM.6919EA75.Up2Date

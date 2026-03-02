@@ -9,6 +9,7 @@ public class OllamaService
     private readonly HttpClient _httpClient;
     private string _baseUrl = "http://localhost:1337";
     private string _model = "";
+    private string _apiKey = "";
     private bool _useOpenAIFormat = true; // Use OpenAI-compatible API by default
 
     public OllamaService()
@@ -16,13 +17,22 @@ public class OllamaService
         _httpClient = new HttpClient();
     }
 
-    public void Configure(string baseUrl, string model)
+    public void Configure(string baseUrl, string model, string apiKey = "")
     {
-        // Detect if using OpenAI-compatible endpoint (has /v1 in path)
-        _useOpenAIFormat = baseUrl.Contains("/v1");
+        // Detect if using OpenAI-compatible endpoint
+        // Check for /v1 in path OR if using known OpenAI-compatible ports (LM Studio: 1234, Jan: 1337)
+        _useOpenAIFormat = baseUrl.Contains("/v1") || baseUrl.Contains(":1234") || baseUrl.Contains(":1337");
         
         _baseUrl = baseUrl.TrimEnd('/');
+        
+        // For OpenAI-compatible servers on known ports, ensure /v1 prefix is present
+        if (_useOpenAIFormat && !_baseUrl.Contains("/v1"))
+        {
+            _baseUrl = _baseUrl + "/v1";
+        }
+        
         _model = model;
+        _apiKey = apiKey;
     }
 
     public async Task<string> SendMessageAsync(string userMessage, List<(string sender, string message)> conversationHistory)
@@ -83,8 +93,24 @@ public class OllamaService
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var response = await _httpClient.PostAsync($"{_baseUrl}/chat/completions", content);
-        response.EnsureSuccessStatusCode();
+        // Add API key if provided, otherwise clear any previous header
+        if (!string.IsNullOrEmpty(_apiKey))
+        {
+            _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+        }
+        else
+        {
+            _httpClient.DefaultRequestHeaders.Authorization = null;
+        }
+
+        var fullUrl = $"{_baseUrl}/chat/completions";
+        var response = await _httpClient.PostAsync(fullUrl, content);
+        
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            return $"Error: HTTP {(int)response.StatusCode} - {response.ReasonPhrase}\nURL: {fullUrl}\nResponse: {errorContent}";
+        }
 
         var responseJson = await response.Content.ReadAsStringAsync();
         
@@ -160,6 +186,16 @@ public class OllamaService
             else
             {
                 url = $"{_baseUrl}/api/tags";
+            }
+
+            // Add API key if provided, otherwise clear any previous header
+            if (!string.IsNullOrEmpty(_apiKey))
+            {
+                _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+            }
+            else
+            {
+                _httpClient.DefaultRequestHeaders.Authorization = null;
             }
 
             var response = await _httpClient.GetAsync(url);

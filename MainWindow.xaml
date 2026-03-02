@@ -92,13 +92,13 @@
         </Grid.RowDefinitions>
 
         <!-- Modern Menu -->
-        <Menu Grid.Row="0" Background="White" Padding="8,4">
+        <Menu Grid.Row="0" Background="White" Padding="4,2">
             <Menu.ItemsPanel>
                 <ItemsPanelTemplate>
                     <DockPanel HorizontalAlignment="Stretch"/>
                 </ItemsPanelTemplate>
             </Menu.ItemsPanel>
-            <MenuItem Header="_File" FontSize="13">
+            <MenuItem Header="🤖 _File" FontSize="12">
                 <MenuItem Header="_Zoom In" Click="ZoomIn_Click" InputGestureText="Ctrl++"/>
                 <MenuItem Header="Zoom _Out" Click="ZoomOut_Click" InputGestureText="Ctrl+-"/>
                 <Separator/>
@@ -106,16 +106,16 @@
                 <Separator/>
                 <MenuItem Header="E_xit" Click="Exit_Click"/>
             </MenuItem>
-            <MenuItem Header="_Help" FontSize="13">
-                <MenuItem Header="_About" Click="About_Click"/>
+            <MenuItem Header="_Help" FontSize="12">
+                <MenuItem Header="ℹ️ _About" Click="About_Click"/>
             </MenuItem>
         </Menu>
 
         <!-- Chat Messages Display -->
-        <Border Grid.Row="1" Background="#FAFAFA">
+        <Border Grid.Row="1" Background="#FAFAFA" Padding="10,10">
             <ListBox x:Name="ChatMessages" 
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     BorderThickness="0" Padding="20,10"
+                     BorderThickness="0" Padding="30,15"
                      Background="Transparent">
                 <ListBox.ItemContainerStyle>
                     <Style TargetType="ListBoxItem">
@@ -143,11 +143,15 @@
                                                FontWeight="SemiBold" 
                                                Foreground="{Binding SenderColor}"
                                                Margin="0,0,0,6"/>
-                                    <TextBlock Text="{Binding Message}" 
-                                               TextWrapping="Wrap"
-                                               FontSize="14"
-                                               Foreground="{Binding TextColor}"
-                                               LineHeight="22"/>
+                                    <TextBox Text="{Binding Message, Mode=OneWay}" 
+                                             TextWrapping="Wrap"
+                                             FontSize="14"
+                                             Foreground="{Binding TextColor}"
+                                             IsReadOnly="True"
+                                             Background="Transparent"
+                                             BorderThickness="0"
+                                             Cursor="Hand"
+                                             SelectionBrush="#B4D7FF"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
