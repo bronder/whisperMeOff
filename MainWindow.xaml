@@ -166,6 +166,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBox x:Name="MessageInput" 
                          Grid.Column="0"
@@ -175,8 +176,15 @@
                          AcceptsReturn="True"
                          VerticalContentAlignment="Center"
                          PreviewKeyDown="MessageInput_PreviewKeyDown"/>
-                <Button x:Name="SendButton" 
+                <Button x:Name="MicButton" 
                         Grid.Column="1" 
+                        Style="{StaticResource ModernButton}"
+                        Content="🎤" 
+                        Margin="12,0,0,0"
+                        Click="MicButton_Click"
+                        ToolTip="Click to start voice input"/>
+                <Button x:Name="SendButton" 
+                        Grid.Column="2" 
                         Style="{StaticResource ModernButton}"
                         Content="Send" 
                         Margin="12,0,0,0"

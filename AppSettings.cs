@@ -32,6 +32,9 @@ public class AppSettings
     public double WindowHeight { get; set; } = 650;
     public bool WindowMaximized { get; set; } = false;
 
+    // Audio input device for speech recognition
+    public string SelectedMicrophoneDevice { get; set; } = "";
+
     private static string SettingsFilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "whisperMeOff",

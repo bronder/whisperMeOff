@@ -33,6 +33,8 @@ public partial class MainWindow : Window
     private OllamaService _aiService = new();
     private List<(string sender, string message)> _conversationHistory = new();
     private AppSettings _settings = new();
+    private SpeechRecognitionService? _speechService;
+    private bool _isRecording;
 
     public MainWindow()
     {
@@ -140,6 +142,78 @@ public partial class MainWindow : Window
         SendMessage();
     }
 
+    private async void MicButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRecording)
+        {
+            // Stop recording
+            _isRecording = false;
+            MicButton.Content = "🎤";
+            MicButton.ToolTip = "Click to start voice input";
+            
+            // Signal stop - don't clear text here, let the async method handle it
+            _speechService?.StopRecognition();
+            return;
+        }
+
+        // Start recording
+        _isRecording = true;
+        MicButton.Content = "⏹";
+        MicButton.ToolTip = "Click to stop voice input";
+        MessageInput.Text = "Listening...";
+
+        try
+        {
+            _speechService = new SpeechRecognitionService();
+            
+            // Parse device index from settings
+            int deviceIndex = -1;
+            var savedDevice = _settings.SelectedMicrophoneDevice;
+            if (!string.IsNullOrEmpty(savedDevice) && savedDevice.Contains(":"))
+            {
+                var parts = savedDevice.Split(':');
+                if (parts.Length > 0 && int.TryParse(parts[0].Trim(), out int parsedIndex))
+                {
+                    deviceIndex = parsedIndex;
+                }
+            }
+            
+            var result = await _speechService.RecognizeSpeechAsync(deviceIndex);
+            
+            // Only process result if we're not recording (user clicked stop or it completed)
+            if (!_isRecording)
+            {
+                System.Diagnostics.Debug.WriteLine($"[MicButton] Result: '{result}'");
+                
+                // Clear the "Listening..." placeholder
+                if (MessageInput.Text == "Listening...")
+                {
+                    MessageInput.Text = "";
+                }
+                
+                // Append recognized text if any
+                if (!string.IsNullOrEmpty(result) && !result.StartsWith("Speech recognition error"))
+                {
+                    MessageInput.Text = result.Trim();
+                }
+                else if (result.StartsWith("Speech recognition error"))
+                {
+                    AddMessage("System", result, true);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            AddMessage("System", $"Voice input error: {ex.Message}", true);
+        }
+        finally
+        {
+            _isRecording = false;
+            MicButton.Content = "🎤";
+            MicButton.ToolTip = "Click to start voice input";
+        }
+    }
+
     private void MessageInput_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && !Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
@@ -199,7 +273,8 @@ public partial class MainWindow : Window
         {
             Title = "AI Settings",
             Width = 480,
-            Height = 750,
+            SizeToContent = SizeToContent.Height,
+            MaxHeight = SystemParameters.PrimaryScreenHeight * 0.9, // Max 90% of screen height
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
@@ -362,6 +437,76 @@ public partial class MainWindow : Window
         agentIdBorder.Child = agentIdTextBox;
         mainPanel.Children.Add(agentIdBorder);
 
+        // Microphone device selection
+        var micLabel = new TextBlock 
+        { 
+            Text = "Microphone Device", 
+            FontSize = 13, 
+            Margin = new Thickness(0, 10, 0, 6)
+        };
+        mainPanel.Children.Add(micLabel);
+
+        // Get available audio input devices
+        var micComboBoxBorder = new Border 
+        { 
+            CornerRadius = new CornerRadius(6),
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 10)
+        };
+        var micComboBox = new ComboBox 
+        { 
+            IsEditable = false,
+            Padding = new Thickness(12, 10, 12, 10),
+            FontSize = 14,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0)
+        };
+        micComboBoxBorder.Child = micComboBox;
+        
+        // Add default option
+        micComboBox.Items.Add("(Default System Microphone)");
+        
+        // Get available audio input devices using NAudio
+        try
+        {
+            var waveInDevices = NAudio.Wave.WaveIn.DeviceCount;
+            for (int deviceId = 0; deviceId < waveInDevices; deviceId++)
+            {
+                var capabilities = NAudio.Wave.WaveIn.GetCapabilities(deviceId);
+                micComboBox.Items.Add($"{deviceId}: {capabilities.ProductName}");
+            }
+        }
+        catch
+        {
+            // If we can't enumerate devices, just show the default
+        }
+        
+        // Select the saved device or default
+        if (string.IsNullOrEmpty(_settings.SelectedMicrophoneDevice))
+        {
+            micComboBox.SelectedIndex = 0;
+        }
+        else
+        {
+            // Try to find the saved device
+            for (int i = 0; i < micComboBox.Items.Count; i++)
+            {
+                if (micComboBox.Items[i].ToString()?.Contains(_settings.SelectedMicrophoneDevice) == true)
+                {
+                    micComboBox.SelectedIndex = i;
+                    break;
+                }
+            }
+            if (micComboBox.SelectedIndex < 0)
+            {
+                micComboBox.SelectedIndex = 0;
+            }
+        }
+        
+        mainPanel.Children.Add(micComboBoxBorder);
+
         // Update fields when profile changes
         void UpdateFields()
         {
@@ -474,6 +619,16 @@ public partial class MainWindow : Window
                 _settings.Profiles[idx].Token = tokenTextBox.Text;
                 _settings.Profiles[idx].AgentId = agentIdTextBox.Text;
                 _settings.SelectedProfileIndex = idx;
+            }
+            
+            // Save microphone device selection
+            if (micComboBox.SelectedIndex > 0)
+            {
+                _settings.SelectedMicrophoneDevice = micComboBox.SelectedItem?.ToString() ?? "";
+            }
+            else
+            {
+                _settings.SelectedMicrophoneDevice = "";
             }
             
             _settings.Save();
