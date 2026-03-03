@@ -56,6 +56,7 @@ packages/
 
 # Whisper models (large binary files)
 *.bin
+ggml-*.bin
 
 # Python
 __pycache__/
