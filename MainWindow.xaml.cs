@@ -1,4 +1,6 @@
-﻿using System.Collections.ObjectModel;
+﻿using System;
+using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -28,6 +30,7 @@ public partial class MainWindow : Window
 {
     public static RoutedCommand ZoomInCommand = new RoutedCommand();
     public static RoutedCommand ZoomOutCommand = new RoutedCommand();
+    public static RoutedCommand ToggleMicCommand = new RoutedCommand();
     
     private ObservableCollection<ChatMessage> _messages = new();
     private OllamaService _aiService = new();
@@ -80,6 +83,7 @@ public partial class MainWindow : Window
         // Bind commands to handlers
         CommandBindings.Add(new CommandBinding(ZoomInCommand, ZoomIn_Executed));
         CommandBindings.Add(new CommandBinding(ZoomOutCommand, ZoomOut_Executed));
+        CommandBindings.Add(new CommandBinding(ToggleMicCommand, ToggleMic_Executed));
         
         ChatMessages.ItemsSource = _messages;
         
@@ -120,6 +124,11 @@ public partial class MainWindow : Window
         ZoomOut_Click(sender, e);
     }
 
+    private void ToggleMic_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        MicButton_Click(sender, e);
+    }
+
     private void AddMessage(string sender, string message, bool isAI = false)
     {
         var chatMessage = new ChatMessage
@@ -151,6 +160,8 @@ public partial class MainWindow : Window
             MicButton.Content = "🎤";
             MicButton.ToolTip = "Click to start voice input";
             
+            System.Diagnostics.Debug.WriteLine("[MicButton] Stop clicked, calling StopRecognition");
+            
             // Signal stop - don't clear text here, let the async method handle it
             _speechService?.StopRecognition();
             return;
@@ -178,9 +189,26 @@ public partial class MainWindow : Window
                 }
             }
             
-            var result = await _speechService.RecognizeSpeechAsync(deviceIndex);
+            string result;
+
+            // Apply translation and model settings to the speech service
+            _speechService.TranslateWithWhisper = _settings.TranslationEnabled;
+            _speechService.WhisperTranslationTarget = _settings.TranslationTargetLanguage;
+            var modelFolder = _settings.WhisperModelFolder;
+            var modelFile = _settings.WhisperModelFileName;
+            if (string.IsNullOrEmpty(modelFolder))
+            {
+                modelFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "whisperMeOff", "models");
+            }
+            _speechService.LocalWhisperModelPath = Path.Combine(modelFolder, modelFile);
+            
+            // Use Whisper.net for transcription (local, fast with GPU)
+            System.Diagnostics.Debug.WriteLine("[MicButton] Starting Whisper transcription");
+            result = await _speechService.RecognizeSpeechWithWhisperAsync(deviceIndex);
+            System.Diagnostics.Debug.WriteLine($"[MicButton] Whisper result: '{result}'");
             
             // Only process result if we're not recording (user clicked stop or it completed)
+            System.Diagnostics.Debug.WriteLine($"[MicButton] Processing result, _isRecording={_isRecording}");
             if (!_isRecording)
             {
                 System.Diagnostics.Debug.WriteLine($"[MicButton] Result: '{result}'");
@@ -192,11 +220,14 @@ public partial class MainWindow : Window
                 }
                 
                 // Append recognized text if any
-                if (!string.IsNullOrEmpty(result) && !result.StartsWith("Speech recognition error"))
+                if (!string.IsNullOrEmpty(result) && !result.StartsWith("Speech recognition error") && !result.StartsWith("Whisper"))
                 {
                     MessageInput.Text = result.Trim();
+                    
+                    // Auto-send the message after voice recognition
+                    SendMessage();
                 }
-                else if (result.StartsWith("Speech recognition error"))
+                else if (result.StartsWith("Speech recognition error") || result.StartsWith("Whisper"))
                 {
                     AddMessage("System", result, true);
                 }
@@ -268,246 +299,219 @@ public partial class MainWindow : Window
 
     private async void Settings_Click(object sender, RoutedEventArgs e)
     {
-        // Show a simple settings dialog
+        // Show a simple settings dialog with tabs
         var settingsWindow = new Window
         {
-            Title = "AI Settings",
-            Width = 480,
+            Title = "Settings",
+            Width = 560,
             SizeToContent = SizeToContent.Height,
-            MaxHeight = SystemParameters.PrimaryScreenHeight * 0.9, // Max 90% of screen height
+            MaxHeight = SystemParameters.PrimaryScreenHeight * 0.85,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
-            Background = new SolidColorBrush(Color.FromRgb(250, 250, 250))
+            Background = new SolidColorBrush(Color.FromRgb(235, 235, 235)),
+            WindowStyle = WindowStyle.None,
+            AllowsTransparency = true,
+            ShowInTaskbar = false
         };
 
-        var mainPanel = new StackPanel { Margin = new Thickness(30, 25, 30, 25) };
+        // Add rounded corners and shadow
+        settingsWindow.Resources.Add(typeof(Window), new Style(typeof(Window))
+        {
+            Setters = { new Setter(Window.EffectProperty, new System.Windows.Media.Effects.DropShadowEffect { BlurRadius = 20, ShadowDepth = 0, Opacity = 0.5 }) }
+        });
 
-        // Title
-        var titleLabel = new TextBlock 
-        { 
-            Text = "Server Configuration", 
-            FontSize = 18, 
-            FontWeight = FontWeights.SemiBold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0, 120, 212)),
-            Margin = new Thickness(0, 0, 0, 20)
-        };
-        mainPanel.Children.Add(titleLabel);
+        var mainGrid = new Grid();
+        mainGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        mainGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
+        // Create TabControl
+        var tabControl = new TabControl { Margin = new Thickness(15, 15, 15, 0) };
+        
+        // ============ TAB 1: LLM Server ============
+        var llmTab = new TabItem { Header = "🤖 LLM Server" };
+        var llmPanel = new StackPanel { Margin = new Thickness(15) };
+        
         // Profile selector
         var profileLabel = new TextBlock { Text = "Server Profile", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
-        mainPanel.Children.Add(profileLabel);
-
-        // Wrap ComboBox in border for rounded corners
-        var profileComboBoxBorder = new Border 
-        { 
-            CornerRadius = new CornerRadius(6),
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 18)
-        };
-        var profileComboBox = new ComboBox 
-        { 
-            IsEditable = true,
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
+        llmPanel.Children.Add(profileLabel);
+        var profileComboBoxBorder = CreateBorder();
+        var profileComboBox = new ComboBox { IsEditable = true, Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         profileComboBoxBorder.Child = profileComboBox;
-        foreach (var profile in _settings.Profiles)
-        {
-            profileComboBox.Items.Add(profile.Name);
-        }
+        foreach (var profile in _settings.Profiles) profileComboBox.Items.Add(profile.Name);
         profileComboBox.SelectedIndex = _settings.SelectedProfileIndex;
-        mainPanel.Children.Add(profileComboBoxBorder);
+        llmPanel.Children.Add(profileComboBoxBorder);
 
         // Server URL
-        var urlLabel = new TextBlock { Text = "Server URL", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
-        mainPanel.Children.Add(urlLabel);
-
-        // Wrap TextBox in border for rounded corners
-        var urlBorder = new Border 
-        { 
-            CornerRadius = new CornerRadius(6),
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 18)
-        };
-        var urlTextBox = new TextBox 
-        { 
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
+        var urlLabel = new TextBlock { Text = "Server URL", FontSize = 13, Margin = new Thickness(0, 15, 0, 6) };
+        llmPanel.Children.Add(urlLabel);
+        var urlBorder = CreateBorder();
+        var urlTextBox = new TextBox { Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         urlBorder.Child = urlTextBox;
-        mainPanel.Children.Add(urlBorder);
+        llmPanel.Children.Add(urlBorder);
 
         // Model name
-        var modelLabel = new TextBlock { Text = "Model Name", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
-        mainPanel.Children.Add(modelLabel);
-
-        // Wrap ComboBox in border for model selection
-        var modelBorder = new Border 
-        { 
-            CornerRadius = new CornerRadius(6),
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 25)
-        };
-        var modelComboBox = new ComboBox 
-        { 
-            IsEditable = true,
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
+        var modelLabel = new TextBlock { Text = "Model Name", FontSize = 13, Margin = new Thickness(0, 15, 0, 6) };
+        llmPanel.Children.Add(modelLabel);
+        var modelBorder = CreateBorder();
+        var modelComboBox = new ComboBox { IsEditable = true, Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         modelBorder.Child = modelComboBox;
-        mainPanel.Children.Add(modelBorder);
+        llmPanel.Children.Add(modelBorder);
 
-        // API Key (optional)
-        var apiKeyLabel = new TextBlock { Text = "API Key (optional)", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
-        mainPanel.Children.Add(apiKeyLabel);
-
-        // Wrap TextBox in border for rounded corners
-        var apiKeyBorder = new Border 
-        { 
-            CornerRadius = new CornerRadius(6),
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 25)
-        };
-        var apiKeyTextBox = new TextBox 
-        { 
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
+        // API Key
+        var apiKeyLabel = new TextBlock { Text = "API Key (optional)", FontSize = 13, Margin = new Thickness(0, 15, 0, 6) };
+        llmPanel.Children.Add(apiKeyLabel);
+        var apiKeyBorder = CreateBorder();
+        var apiKeyTextBox = new TextBox { Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         apiKeyBorder.Child = apiKeyTextBox;
-        mainPanel.Children.Add(apiKeyBorder);
+        llmPanel.Children.Add(apiKeyBorder);
 
         // Token (for OpenClaw)
-        var tokenLabel = new TextBlock { Text = "Token", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
-        mainPanel.Children.Add(tokenLabel);
-
-        var tokenBorder = new Border 
-        { 
-            CornerRadius = new CornerRadius(6),
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 18)
-        };
-        var tokenTextBox = new TextBox 
-        { 
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
+        var tokenLabel = new TextBlock { Text = "Token (optional)", FontSize = 13, Margin = new Thickness(0, 15, 0, 6) };
+        llmPanel.Children.Add(tokenLabel);
+        var tokenBorder = CreateBorder();
+        var tokenTextBox = new TextBox { Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         tokenBorder.Child = tokenTextBox;
-        mainPanel.Children.Add(tokenBorder);
+        llmPanel.Children.Add(tokenBorder);
 
-        // Agent ID (for OpenClaw)
-        var agentIdLabel = new TextBlock { Text = "Agent ID", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
-        mainPanel.Children.Add(agentIdLabel);
-
-        var agentIdBorder = new Border 
-        { 
-            CornerRadius = new CornerRadius(6),
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 25)
-        };
-        var agentIdTextBox = new TextBox 
-        { 
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
+        // Agent ID
+        var agentIdLabel = new TextBlock { Text = "Agent ID (optional)", FontSize = 13, Margin = new Thickness(0, 15, 0, 6) };
+        llmPanel.Children.Add(agentIdLabel);
+        var agentIdBorder = CreateBorder();
+        var agentIdTextBox = new TextBox { Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         agentIdBorder.Child = agentIdTextBox;
-        mainPanel.Children.Add(agentIdBorder);
+        llmPanel.Children.Add(agentIdBorder);
+        
+        llmTab.Content = llmPanel;
+        tabControl.Items.Add(llmTab);
 
-        // Microphone device selection
-        var micLabel = new TextBlock 
-        { 
-            Text = "Microphone Device", 
-            FontSize = 13, 
-            Margin = new Thickness(0, 10, 0, 6)
-        };
-        mainPanel.Children.Add(micLabel);
+        // ============ TAB 2: Whisper ============
+        var whisperTab = new TabItem { Header = "🎙️ Whisper" };
+        var whisperPanel = new StackPanel { Margin = new Thickness(15) };
+        
+        // Model selection
+        var localModelLabel = new TextBlock { Text = "Model Size", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
+        whisperPanel.Children.Add(localModelLabel);
+        var localModelPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 15) };
+        var localModelCombo = new ComboBox { Width = 200, Padding = new Thickness(8, 6, 8, 6) };
+        localModelCombo.Items.Add("ggml-tiny.bin (~75 MB)");
+        localModelCombo.Items.Add("ggml-base.bin (~150 MB)");
+        localModelCombo.Items.Add("ggml-small.bin (~500 MB)");
+        localModelCombo.Items.Add("ggml-medium.bin (~1.5 GB)");
+        localModelCombo.SelectedIndex = 2; // default to small
+        // Try to match saved setting
+        for (int i = 0; i < localModelCombo.Items.Count; i++)
+        {
+            if (localModelCombo.Items[i]?.ToString()?.Contains(_settings.WhisperModelFileName) == true)
+            {
+                localModelCombo.SelectedIndex = i;
+                break;
+            }
+        }
+        localModelPanel.Children.Add(localModelCombo);
+        var downloadModelButton = new Button { Content = "⬇️ Download", Margin = new Thickness(8, 0, 0, 0), Height = 30, VerticalAlignment = VerticalAlignment.Center };
+        localModelPanel.Children.Add(downloadModelButton);
+        whisperPanel.Children.Add(localModelPanel);
 
-        // Get available audio input devices
-        var micComboBoxBorder = new Border 
-        { 
-            CornerRadius = new CornerRadius(6),
-            Background = Brushes.White,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 0, 0, 10)
-        };
-        var micComboBox = new ComboBox 
-        { 
-            IsEditable = false,
-            Padding = new Thickness(12, 10, 12, 10),
-            FontSize = 14,
-            Background = Brushes.Transparent,
-            BorderThickness = new Thickness(0)
-        };
+        // Model folder
+        var modelFolderLabel = new TextBlock { Text = "Model Folder", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
+        whisperPanel.Children.Add(modelFolderLabel);
+        var modelFolderBorder = CreateBorder();
+        var modelFolderBox = new TextBox { Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
+        modelFolderBox.Text = _settings.WhisperModelFolder;
+        modelFolderBorder.Child = modelFolderBox;
+        whisperPanel.Children.Add(modelFolderBorder);
+
+        // Separator
+        var separator = new Separator { Margin = new Thickness(0, 20, 0, 20) };
+        whisperPanel.Children.Add(separator);
+
+        // Translation settings
+        var translationLabel = new TextBlock { Text = "Translation", FontSize = 14, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 10) };
+        whisperPanel.Children.Add(translationLabel);
+        
+        var translationPanel = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 10) };
+        var translationCheck = new CheckBox { Content = "Enable translation", VerticalAlignment = VerticalAlignment.Center };
+        var translationLang = new ComboBox { Width = 100, Margin = new Thickness(12, 0, 0, 0), Padding = new Thickness(8, 6, 8, 6) };
+        translationLang.Items.Add("en");
+        translationLang.Items.Add("es");
+        translationLang.Items.Add("fr");
+        translationLang.Items.Add("de");
+        translationLang.Items.Add("zh");
+        translationLang.Items.Add("ja");
+        translationPanel.Children.Add(translationCheck);
+        translationPanel.Children.Add(translationLang);
+        whisperPanel.Children.Add(translationPanel);
+
+        // Initialize translation controls
+        translationCheck.IsChecked = _settings.TranslationEnabled;
+        translationLang.SelectedItem = string.IsNullOrEmpty(_settings.TranslationTargetLanguage) ? "en" : _settings.TranslationTargetLanguage;
+        
+        whisperTab.Content = whisperPanel;
+        tabControl.Items.Add(whisperTab);
+
+        // ============ TAB 3: Audio ============
+        var audioTab = new TabItem { Header = "🔊 Audio" };
+        var audioPanel = new StackPanel { Margin = new Thickness(15) };
+        
+        // Microphone device
+        var micLabel = new TextBlock { Text = "Microphone Device", FontSize = 13, Margin = new Thickness(0, 0, 0, 6) };
+        audioPanel.Children.Add(micLabel);
+        var micComboBoxBorder = CreateBorder();
+        var micComboBox = new ComboBox { IsEditable = false, Padding = new Thickness(12, 10, 12, 10), FontSize = 14, Background = Brushes.Transparent, BorderThickness = new Thickness(0) };
         micComboBoxBorder.Child = micComboBox;
         
-        // Add default option
         micComboBox.Items.Add("(Default System Microphone)");
-        
-        // Get available audio input devices using NAudio
         try
         {
-            var waveInDevices = NAudio.Wave.WaveIn.DeviceCount;
-            for (int deviceId = 0; deviceId < waveInDevices; deviceId++)
+            for (int deviceId = 0; deviceId < NAudio.Wave.WaveIn.DeviceCount; deviceId++)
             {
-                var capabilities = NAudio.Wave.WaveIn.GetCapabilities(deviceId);
-                micComboBox.Items.Add($"{deviceId}: {capabilities.ProductName}");
+                var caps = NAudio.Wave.WaveIn.GetCapabilities(deviceId);
+                micComboBox.Items.Add($"{deviceId}: {caps.ProductName}");
             }
         }
-        catch
-        {
-            // If we can't enumerate devices, just show the default
-        }
+        catch { }
         
-        // Select the saved device or default
         if (string.IsNullOrEmpty(_settings.SelectedMicrophoneDevice))
-        {
             micComboBox.SelectedIndex = 0;
-        }
         else
         {
-            // Try to find the saved device
             for (int i = 0; i < micComboBox.Items.Count; i++)
             {
-                if (micComboBox.Items[i].ToString()?.Contains(_settings.SelectedMicrophoneDevice) == true)
-                {
-                    micComboBox.SelectedIndex = i;
-                    break;
-                }
+                if (micComboBox.Items[i]?.ToString()?.Contains(_settings.SelectedMicrophoneDevice) == true)
+                { micComboBox.SelectedIndex = i; break; }
             }
-            if (micComboBox.SelectedIndex < 0)
-            {
-                micComboBox.SelectedIndex = 0;
-            }
+            if (micComboBox.SelectedIndex < 0) micComboBox.SelectedIndex = 0;
         }
+        audioPanel.Children.Add(micComboBoxBorder);
         
-        mainPanel.Children.Add(micComboBoxBorder);
+        audioTab.Content = audioPanel;
+        tabControl.Items.Add(audioTab);
 
-        // Update fields when profile changes
+        Grid.SetRow(tabControl, 0);
+        mainGrid.Children.Add(tabControl);
+
+        // Helper to create bordered textbox
+        Border CreateBorder() => new Border 
+        { 
+            CornerRadius = new CornerRadius(6),
+            Background = Brushes.White,
+            BorderBrush = new SolidColorBrush(Color.FromRgb(224, 224, 224)),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 0, 0, 0)
+        };
+
+        // ============ BUTTONS ============
+        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(15, 15, 15, 15) };
+        
+        var primaryStyle = CreatePrimaryButtonStyle();
+        var cancelStyle = CreateCancelButtonStyle();
+        
+        var testButton = new Button { Content = "Test Connection", Style = primaryStyle, Margin = new Thickness(0, 0, 12, 0), Height = 44, MinWidth = 120 };
+        var saveButton = new Button { Content = "Save", Style = primaryStyle, Margin = new Thickness(0, 0, 0, 0), Height = 44, MinWidth = 80 };
+        var cancelButton = new Button { Content = "Cancel", Style = cancelStyle, Margin = new Thickness(12, 0, 0, 0), Height = 44, MinWidth = 80 };
+
+        // Event handlers
         void UpdateFields()
         {
             var idx = profileComboBox.SelectedIndex;
@@ -520,65 +524,34 @@ public partial class MainWindow : Window
                 agentIdTextBox.Text = _settings.Profiles[idx].AgentId;
             }
         }
-        
         profileComboBox.SelectionChanged += (s, args) => UpdateFields();
-        UpdateFields(); // Initial load
+        UpdateFields();
 
-        // Buttons
-        var buttonPanel = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        
-        // Blue primary button style with rounded corners (matching main window Send button)
-        var primaryButtonStyle = new Style(typeof(Button));
-        primaryButtonStyle.Setters.Add(new Setter(Button.BackgroundProperty, new SolidColorBrush(Color.FromRgb(0, 120, 212))));
-        primaryButtonStyle.Setters.Add(new Setter(Button.ForegroundProperty, Brushes.White));
-        primaryButtonStyle.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(0)));
-        primaryButtonStyle.Setters.Add(new Setter(Button.PaddingProperty, new Thickness(20, 12, 20, 12)));
-        primaryButtonStyle.Setters.Add(new Setter(Button.FontSizeProperty, 14.0));
-        primaryButtonStyle.Setters.Add(new Setter(Button.FontWeightProperty, FontWeights.SemiBold));
-        primaryButtonStyle.Setters.Add(new Setter(Button.CursorProperty, Cursors.Hand));
-        
-        // Add rounded corner template (CornerRadius=8 to match main window)
-        var primaryTemplate = new ControlTemplate(typeof(Button));
-        var primaryBorder = new FrameworkElementFactory(typeof(Border));
-        primaryBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
-        primaryBorder.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(0, 120, 212)));
-        primaryBorder.SetValue(Border.BorderThicknessProperty, new Thickness(0));
-        var primaryContentPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
-        primaryContentPresenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        primaryContentPresenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-        primaryBorder.AppendChild(primaryContentPresenter);
-        primaryTemplate.VisualTree = primaryBorder;
-        primaryButtonStyle.Setters.Add(new Setter(Button.TemplateProperty, primaryTemplate));
-        
-        var testButton = new Button { Content = "Test Connection", Style = primaryButtonStyle, Margin = new Thickness(0, 0, 12, 0), Height = 50, MinWidth = 120 };
-        var saveButton = new Button { Content = "Save", Style = primaryButtonStyle, Margin = new Thickness(0, 0, 0, 0), Height = 50, MinWidth = 80 };
-        
-        // Gray cancel button style with rounded corners
-        var cancelButtonStyle = new Style(typeof(Button));
-        cancelButtonStyle.Setters.Add(new Setter(Button.BackgroundProperty, new SolidColorBrush(Color.FromRgb(240, 240, 240))));
-        cancelButtonStyle.Setters.Add(new Setter(Button.ForegroundProperty, new SolidColorBrush(Color.FromRgb(60, 60, 60))));
-        cancelButtonStyle.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(1)));
-        cancelButtonStyle.Setters.Add(new Setter(Button.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(200, 200, 200))));
-        cancelButtonStyle.Setters.Add(new Setter(Button.PaddingProperty, new Thickness(20, 12, 20, 12)));
-        cancelButtonStyle.Setters.Add(new Setter(Button.FontSizeProperty, 14.0));
-        cancelButtonStyle.Setters.Add(new Setter(Button.FontWeightProperty, FontWeights.SemiBold));
-        cancelButtonStyle.Setters.Add(new Setter(Button.CursorProperty, Cursors.Hand));
-        
-        // Add rounded corner template (CornerRadius=8 to match main window)
-        var cancelTemplate = new ControlTemplate(typeof(Button));
-        var cancelBorder = new FrameworkElementFactory(typeof(Border));
-        cancelBorder.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
-        cancelBorder.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(240, 240, 240)));
-        cancelBorder.SetValue(Border.BorderThicknessProperty, new Thickness(1));
-        cancelBorder.SetValue(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(200, 200, 200)));
-        var cancelContentPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
-        cancelContentPresenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
-        cancelContentPresenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
-        cancelBorder.AppendChild(cancelContentPresenter);
-        cancelTemplate.VisualTree = cancelBorder;
-        cancelButtonStyle.Setters.Add(new Setter(Button.TemplateProperty, cancelTemplate));
-        
-        var cancelButton = new Button { Content = "Cancel", Style = cancelButtonStyle, Margin = new Thickness(12, 0, 0, 0), Height = 50, MinWidth = 80 };
+        downloadModelButton.Click += async (s, args) =>
+        {
+            try
+            {
+                var fileNames = new[] { "ggml-tiny.bin", "ggml-base.bin", "ggml-small.bin", "ggml-medium.bin" };
+                var fileName = fileNames[localModelCombo.SelectedIndex];
+                var folder = string.IsNullOrEmpty(modelFolderBox.Text) ? _settings.WhisperModelFolder : modelFolderBox.Text;
+                Directory.CreateDirectory(folder);
+                var targetPath = Path.Combine(folder, fileName);
+                downloadModelButton.IsEnabled = false;
+                downloadModelButton.Content = "Downloading...";
+                await SpeechRecognitionService.DownloadModelToPathAsync(targetPath);
+                downloadModelButton.Content = "Downloaded ✅";
+                MessageBox.Show($"Model downloaded to: {targetPath}", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Download failed: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                downloadModelButton.IsEnabled = true;
+                downloadModelButton.Content = "⬇️ Download Model";
+            }
+        };
 
         testButton.Click += async (s, args) =>
         {
@@ -587,24 +560,14 @@ public partial class MainWindow : Window
             var models = await testService.GetAvailableModelsAsync();
             if (models.Count > 0)
             {
-                // Populate the model ComboBox with available models
                 modelComboBox.Items.Clear();
-                foreach (var model in models)
-                {
-                    modelComboBox.Items.Add(model);
-                }
-                
-                // Select the first model if none selected
-                if (modelComboBox.SelectedIndex < 0 && modelComboBox.Items.Count > 0)
-                {
-                    modelComboBox.SelectedIndex = 0;
-                }
-                
-                MessageBox.Show($"✓ Connected! Found {models.Count} model(s). Select from the dropdown or type a custom model name.", "Connection Test", MessageBoxButton.OK, MessageBoxImage.Information);
+                foreach (var m in models) modelComboBox.Items.Add(m);
+                if (modelComboBox.SelectedIndex < 0 && modelComboBox.Items.Count > 0) modelComboBox.SelectedIndex = 0;
+                MessageBox.Show($"✓ Connected! Found {models.Count} model(s).", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
             }
             else
             {
-                MessageBox.Show("✗ Could not connect. Make sure your AI server is running.", "Connection Test", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("✗ Could not connect. Is the server running?", "Connection Failed", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         };
 
@@ -621,15 +584,16 @@ public partial class MainWindow : Window
                 _settings.SelectedProfileIndex = idx;
             }
             
-            // Save microphone device selection
+            var fileNames = new[] { "ggml-tiny.bin", "ggml-base.bin", "ggml-small.bin", "ggml-medium.bin" };
+            _settings.WhisperModelFileName = fileNames[localModelCombo.SelectedIndex];
+            _settings.WhisperModelFolder = modelFolderBox.Text;
+            _settings.TranslationEnabled = translationCheck.IsChecked == true;
+            _settings.TranslationTargetLanguage = translationLang.SelectedItem?.ToString() ?? "en";
+            
             if (micComboBox.SelectedIndex > 0)
-            {
                 _settings.SelectedMicrophoneDevice = micComboBox.SelectedItem?.ToString() ?? "";
-            }
             else
-            {
                 _settings.SelectedMicrophoneDevice = "";
-            }
             
             _settings.Save();
             
@@ -640,14 +604,7 @@ public partial class MainWindow : Window
             try
             {
                 var models = await _aiService.GetAvailableModelsAsync();
-                if (models.Count > 0)
-                {
-                    AddMessage("AI", $"✓ Connected! Models available: {string.Join(", ", models)}", true);
-                }
-                else
-                {
-                    AddMessage("AI", "⚠ Connected to server, but no models found. Make sure a model is loaded.", true);
-                }
+                AddMessage("AI", models.Count > 0 ? $"✓ Connected! Models: {string.Join(", ", models)}" : "⚠ Connected, but no models found.", true);
             }
             catch (Exception ex)
             {
@@ -662,10 +619,92 @@ public partial class MainWindow : Window
         buttonPanel.Children.Add(testButton);
         buttonPanel.Children.Add(saveButton);
         buttonPanel.Children.Add(cancelButton);
-        mainPanel.Children.Add(buttonPanel);
+        Grid.SetRow(buttonPanel, 1);
+        mainGrid.Children.Add(buttonPanel);
 
-        settingsWindow.Content = mainPanel;
+        // Wrap content in a border for rounded corners
+        var contentBorder = new Border
+        {
+            CornerRadius = new CornerRadius(12),
+            Background = Brushes.White,
+            Margin = new Thickness(10)
+        };
+        contentBorder.Child = mainGrid;
+        
+        // Add a simple title bar with close button
+        var titleBar = new Grid { Height = 44, Background = new SolidColorBrush(Color.FromRgb(245, 245, 245)) };
+        titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        titleBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        
+        var titleText = new TextBlock { Text = "Settings", FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(15, 0, 0, 0) };
+        var closeButton = new Button { Content = "✕", Width = 44, Height = 44, Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 16, Cursor = Cursors.Hand };
+        closeButton.Click += (s, args) => settingsWindow.Close();
+        
+        Grid.SetColumn(titleText, 0);
+        Grid.SetColumn(closeButton, 1);
+        titleBar.Children.Add(titleText);
+        titleBar.Children.Add(closeButton);
+        
+        var rootGrid = new Grid();
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        rootGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        
+        Grid.SetRow(titleBar, 0);
+        Grid.SetRow(contentBorder, 1);
+        rootGrid.Children.Add(titleBar);
+        rootGrid.Children.Add(contentBorder);
+        
+        settingsWindow.Content = rootGrid;
         settingsWindow.ShowDialog();
+    }
+
+    private Style CreatePrimaryButtonStyle()
+    {
+        var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Button.BackgroundProperty, new SolidColorBrush(Color.FromRgb(0, 120, 212))));
+        style.Setters.Add(new Setter(Button.ForegroundProperty, Brushes.White));
+        style.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(0)));
+        style.Setters.Add(new Setter(Button.PaddingProperty, new Thickness(20, 12, 20, 12)));
+        style.Setters.Add(new Setter(Button.FontSizeProperty, 14.0));
+        style.Setters.Add(new Setter(Button.FontWeightProperty, FontWeights.SemiBold));
+        style.Setters.Add(new Setter(Button.CursorProperty, Cursors.Hand));
+        var template = new ControlTemplate(typeof(Button));
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+        border.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(0, 120, 212)));
+        var contentPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
+        contentPresenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        contentPresenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        border.AppendChild(contentPresenter);
+        template.VisualTree = border;
+        style.Setters.Add(new Setter(Button.TemplateProperty, template));
+        return style;
+    }
+
+    private Style CreateCancelButtonStyle()
+    {
+        var style = new Style(typeof(Button));
+        style.Setters.Add(new Setter(Button.BackgroundProperty, new SolidColorBrush(Color.FromRgb(240, 240, 240))));
+        style.Setters.Add(new Setter(Button.ForegroundProperty, new SolidColorBrush(Color.FromRgb(60, 60, 60))));
+        style.Setters.Add(new Setter(Button.BorderThicknessProperty, new Thickness(1)));
+        style.Setters.Add(new Setter(Button.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(200, 200, 200))));
+        style.Setters.Add(new Setter(Button.PaddingProperty, new Thickness(20, 12, 20, 12)));
+        style.Setters.Add(new Setter(Button.FontSizeProperty, 14.0));
+        style.Setters.Add(new Setter(Button.FontWeightProperty, FontWeights.SemiBold));
+        style.Setters.Add(new Setter(Button.CursorProperty, Cursors.Hand));
+        var template = new ControlTemplate(typeof(Button));
+        var border = new FrameworkElementFactory(typeof(Border));
+        border.SetValue(Border.CornerRadiusProperty, new CornerRadius(8));
+        border.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(240, 240, 240)));
+        border.SetValue(Border.BorderThicknessProperty, new Thickness(1));
+        border.SetValue(Border.BorderBrushProperty, new SolidColorBrush(Color.FromRgb(200, 200, 200)));
+        var contentPresenter = new FrameworkElementFactory(typeof(ContentPresenter));
+        contentPresenter.SetValue(ContentPresenter.HorizontalAlignmentProperty, HorizontalAlignment.Center);
+        contentPresenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center);
+        border.AppendChild(contentPresenter);
+        template.VisualTree = border;
+        style.Setters.Add(new Setter(Button.TemplateProperty, template));
+        return style;
     }
 
     private ImageSource CreateRobotIcon()

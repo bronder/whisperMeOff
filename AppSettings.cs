@@ -35,6 +35,17 @@ public class AppSettings
     // Audio input device for speech recognition
     public string SelectedMicrophoneDevice { get; set; } = "";
 
+    // Translation settings (Whisper.net built-in)
+    public bool TranslationEnabled { get; set; } = false;
+    public string TranslationTargetLanguage { get; set; } = "en";
+
+    // Local Whisper model settings
+    public string WhisperModelFileName { get; set; } = "ggml-small.bin";
+    public string WhisperModelFolder { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "whisperMeOff",
+        "models");
+
     private static string SettingsFilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "whisperMeOff",
